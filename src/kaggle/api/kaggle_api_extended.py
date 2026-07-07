@@ -5454,7 +5454,10 @@ class KaggleApi:
                         extension = ".irnb"
                     elif language == "julia":
                         extension = ".ijlnb"
-                file_name = blob.slug + extension
+                if extension:
+                    file_name = blob.slug + extension
+                else:
+                    file_name = None
 
             if file_name is None:
                 print(

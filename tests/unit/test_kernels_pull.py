@@ -136,6 +136,40 @@ class TestKernelsPull(unittest.TestCase):
         # Second call: metadata
         mock_open_file.assert_any_call("/tmp/dummy/kernel-metadata.json", "w")
 
+    @patch("os.path.exists", return_value=True)
+    @patch("os.path.isfile", return_value=False)
+    @patch("builtins.open", new_callable=mock_open)
+    @patch.object(KaggleApi, "build_kaggle_client")
+    def test_kernels_pull_fallback_scenarios(self, mock_client, mock_open_file, mock_isfile, mock_exists):
+        scenarios = [
+            ("unsupported-lang", "script"),
+            ("", "script"),
+            ("python", ""),
+            ("python", "something-new"),
+        ]
+        for lang, kt in scenarios:
+            # Setup mocks
+            mock_kaggle = MagicMock()
+            mock_response = MagicMock()
+            mock_blob = MagicMock()
+            mock_blob.language = lang
+            mock_blob.kernel_type = kt
+            mock_blob.slug = "my-slug"
+            mock_blob.source = "print('hello')"
+            mock_response.blob = mock_blob
+
+            mock_kaggle.kernels.kernels_api_client.get_kernel.return_value = mock_response
+            mock_client.return_value.__enter__ = MagicMock(return_value=mock_kaggle)
+            mock_client.return_value.__exit__ = MagicMock(return_value=False)
+
+            mock_open_file.reset_mock()
+            # Call method
+            self.api.kernels_pull("owner/my-slug", path="/tmp/dummy")
+
+            # Verify file write uses script.py with forward slash separator to match standard formatting
+            mock_open_file.assert_called_once_with("/tmp/dummy/script.py", "w", encoding="utf-8")
+            mock_open_file().write.assert_called_once_with("print('hello')")
+
 
 if __name__ == "__main__":
     unittest.main()
