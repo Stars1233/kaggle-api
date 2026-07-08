@@ -5351,7 +5351,7 @@ class KaggleApi:
         if not os.path.isfile(meta_file):
             raise ValueError("Metadata file not found: " + str(meta_file))
 
-        with open(meta_file) as f:
+        with open(meta_file, encoding="utf-8") as f:
             meta_data = json.load(f)
 
         title = self.get_or_default(meta_data, "title", None)
@@ -5421,7 +5421,7 @@ class KaggleApi:
                 "If specified, the docker_image_pinning_type must be " "one of " + str(self.valid_push_pinning_types)
             )
 
-        with open(code_file) as f:
+        with open(code_file, encoding="utf-8") as f:
             script_body = f.read()
 
         if kernel_type == "notebook":
