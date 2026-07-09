@@ -861,7 +861,7 @@ class KaggleApi:
     command_prefixes_allowing_anonymous_access = ("datasets download", "datasets files", "auth login")
 
     # Attributes
-    competition_fields = ["ref", "deadline", "category", "reward", "teamCount", "userHasEntered"]
+    competition_fields = ["ref", "deadline", "category", "reward", "teamCount", "userHasEntered", "userRank"]
     submission_fields = ["ref", "fileName", "date", "description", "status", "publicScore", "privateScore"]
     competition_file_fields = ["name", "totalBytes", "creationDate"]
     competition_file_labels = ["name", "size", "creationDate"]

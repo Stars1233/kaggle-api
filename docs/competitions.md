@@ -24,6 +24,13 @@ kaggle competitions list [options]
 *   `-p, --page <PAGE>`: Page number for results (default: 1).
 *   `-s, --search <SEARCH_TERM>`: Search term.
 *   `-v, --csv`: Print results in CSV format.
+*   `--format`: Output format (`csv`, `table`, `json`, or a field projection). See [output_format.md](./output_format.md).
+
+**Output columns:**
+
+`ref`, `deadline`, `category`, `reward`, `teamCount`, `userHasEntered`, `userRank`
+
+`userRank` is your public leaderboard position when you have entered the competition. It is `0` when you have not entered, or when no public rank is available yet.
 
 **Example:**
 
@@ -33,9 +40,15 @@ List featured competitions in the general group, sorted by prize:
 kaggle competitions list --group general --category featured --sort-by prize
 ```
 
+List entered competitions with rank in CSV format:
+
+```bash
+kaggle competitions list --group entered -v
+```
+
 **Purpose:**
 
-This command helps you discover new competitions or find specific ones based on various criteria.
+This command helps you discover new competitions or find specific ones based on various criteria. Use `--group entered` to see your rank across competitions you have joined.
 
 ## `kaggle competitions files`
 

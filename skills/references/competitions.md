@@ -56,16 +56,22 @@ kaggle competitions list [options]
 - `--page-token <TOKEN>`: Page token.
 - `-s, --search <TERM>`: Search text.
 - `-v, --csv`: Print CSV instead of table.
+- `--format`: Output format (`csv`, `table`, `json`, or field projection).
+
+**Output columns:** `ref`, `deadline`, `category`, `reward`, `teamCount`, `userHasEntered`, `userRank`
+
+`userRank` is your public leaderboard position when entered. It is `0` when not entered or when no public rank is available yet.
 
 **Examples:**
 
 ```bash
 kaggle competitions list
 kaggle competitions list --category gettingStarted --sort-by latestDeadline
+kaggle competitions list --group entered -v
 kaggle c list -s titanic -v
 ```
 
-**Purpose:** Find competition slugs to use with other commands.
+**Purpose:** Find competition slugs to use with other commands. Use `--group entered` to see your rank across joined competitions.
 
 ## `kaggle competitions files`
 
