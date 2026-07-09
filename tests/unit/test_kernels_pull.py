@@ -36,7 +36,7 @@ class TestKernelsPull(unittest.TestCase):
         mock_client.return_value.__exit__ = MagicMock(return_value=False)
 
         # Call method
-        self.api.kernels_pull("owner/my-slug", path="/tmp/dummy")
+        self.api.kernels_pull("owner/my-slug", path=os.path.join("/tmp", "dummy"))
 
         # Verify request
         call_args = mock_kaggle.kernels.kernels_api_client.get_kernel.call_args
@@ -45,7 +45,8 @@ class TestKernelsPull(unittest.TestCase):
         self.assertEqual(request.kernel_slug, "my-slug")
 
         # Verify file write
-        mock_open_file.assert_called_once_with("/tmp/dummy/my-slug.py", "w", encoding="utf-8")
+        expected_path = os.path.join("/tmp", "dummy", "my-slug.py")
+        mock_open_file.assert_called_once_with(expected_path, "w", encoding="utf-8")
         mock_open_file().write.assert_called_once_with("print('hello')")
 
     @patch("os.path.exists", return_value=True)
@@ -68,7 +69,7 @@ class TestKernelsPull(unittest.TestCase):
         mock_client.return_value.__exit__ = MagicMock(return_value=False)
 
         # Call method with version
-        self.api.kernels_pull("owner/my-slug/3", path="/tmp/dummy")
+        self.api.kernels_pull("owner/my-slug/3", path=os.path.join("/tmp", "dummy"))
 
         # Verify request has version in slug
         call_args = mock_kaggle.kernels.kernels_api_client.get_kernel.call_args
@@ -77,7 +78,8 @@ class TestKernelsPull(unittest.TestCase):
         self.assertEqual(request.kernel_slug, "my-slug/3")
 
         # Verify file write (path should still use clean slug)
-        mock_open_file.assert_called_once_with("/tmp/dummy/my-slug.py", "w", encoding="utf-8")
+        expected_path = os.path.join("/tmp", "dummy", "my-slug.py")
+        mock_open_file.assert_called_once_with(expected_path, "w", encoding="utf-8")
         mock_open_file().write.assert_called_once_with("print('hello')")
 
     @patch("os.path.exists", return_value=True)
@@ -119,7 +121,7 @@ class TestKernelsPull(unittest.TestCase):
         mock_client.return_value.__exit__ = MagicMock(return_value=False)
 
         # Call method with metadata=True
-        self.api.kernels_pull("owner/my-slug/3", path="/tmp/dummy", metadata=True)
+        self.api.kernels_pull("owner/my-slug/3", path=os.path.join("/tmp", "dummy"), metadata=True)
 
         # Verify request has version in slug
         call_args = mock_kaggle.kernels.kernels_api_client.get_kernel.call_args
@@ -132,9 +134,11 @@ class TestKernelsPull(unittest.TestCase):
 
         # We can check the calls
         # First call: script
-        mock_open_file.assert_any_call("/tmp/dummy/my-slug.py", "w", encoding="utf-8")
+        expected_script_path = os.path.join("/tmp", "dummy", "my-slug.py")
+        mock_open_file.assert_any_call(expected_script_path, "w", encoding="utf-8")
         # Second call: metadata
-        mock_open_file.assert_any_call("/tmp/dummy/kernel-metadata.json", "w")
+        expected_metadata_path = os.path.join("/tmp", "dummy", "kernel-metadata.json")
+        mock_open_file.assert_any_call(expected_metadata_path, "w")
 
     @patch("os.path.exists", return_value=True)
     @patch("os.path.isfile", return_value=False)
@@ -164,10 +168,11 @@ class TestKernelsPull(unittest.TestCase):
 
             mock_open_file.reset_mock()
             # Call method
-            self.api.kernels_pull("owner/my-slug", path="/tmp/dummy")
+            self.api.kernels_pull("owner/my-slug", path=os.path.join("/tmp", "dummy"))
 
-            # Verify file write uses script.py with forward slash separator to match standard formatting
-            mock_open_file.assert_called_once_with("/tmp/dummy/script.py", "w", encoding="utf-8")
+            # Verify file write uses script.py
+            expected_path = os.path.join("/tmp", "dummy", "script.py")
+            mock_open_file.assert_called_once_with(expected_path, "w", encoding="utf-8")
             mock_open_file().write.assert_called_once_with("print('hello')")
 
 
