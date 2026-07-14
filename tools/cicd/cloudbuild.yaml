@@ -30,7 +30,7 @@ steps:
 - name: us-docker.pkg.dev/$PROJECT_ID/tools/cli-builder:${_PYTHON_VERSION}
   id: tests
   env:
-  - 'HOME=/builder/home'
+  - 'HOME=/builder/home/tests'
   args:
   - run
   - test:pytest
@@ -40,7 +40,7 @@ steps:
 - name: us-docker.pkg.dev/$PROJECT_ID/tools/cli-builder:${_PYTHON_VERSION}
   id: lint
   env:
-  - 'HOME=/builder/home'
+  - 'HOME=/builder/home/lint'
   args:
   - run
   - lint:all
@@ -53,10 +53,6 @@ steps:
   args:
   - '-c'
   - |
-    if [ "$BRANCH_NAME" != "main" ]; then
-      echo "Not on main branch ($BRANCH_NAME), skipping secrets download."
-      exit 0
-    fi
     gcloud secrets versions access latest --secret=integration-tests --project=464139560241 > /root/secrets.sh
   volumes:
   - name: 'root'
@@ -68,14 +64,10 @@ steps:
   id: integration-tests
   entrypoint: 'bash'
   env:
-  - 'HOME=/builder/home'
+  - 'HOME=/builder/home/integration'
   args:
   - '-c'
   - |
-    if [ "$BRANCH_NAME" != "main" ]; then
-      echo "Not on main branch ($BRANCH_NAME), skipping integration tests."
-      exit 0
-    fi
     export KAGGLE_USERNAME
     export KAGGLE_KEY
     if [ -f /root/secrets.sh ]; then
