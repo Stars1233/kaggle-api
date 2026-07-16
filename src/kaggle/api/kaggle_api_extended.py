@@ -416,29 +416,104 @@ class OutputFormat(Enum):
         return self.value
 
 
+DEFAULT_IGNORE_PATTERNS = [
+    ".git/",
+    "*/.git/",
+    ".cache/",
+    ".huggingface/",
+]
+
+
+def should_ignore(rel_path: str, is_dir: bool, patterns: List[str]) -> bool:
+    """Helper to check if a path should be ignored based on patterns."""
+    import fnmatch
+
+    rel_path = rel_path.replace(os.path.sep, "/")
+    match_path = rel_path + "/" if is_dir and not rel_path.endswith("/") else rel_path
+
+    for pattern in patterns:
+        pattern = pattern.replace(os.path.sep, "/")
+        if pattern.endswith("/"):
+            if not is_dir:
+                continue
+        if fnmatch.fnmatch(match_path, pattern):
+            return True
+    return False
+
+
 class DirectoryArchive(object):
-    """
-    Context manager for handling directory archives.
+    """Context manager for handling directory archives with filtering.
 
-    This class provides a context manager for working with directory archives in various formats.
-    It manages the lifecycle of the archive, including opening and closing resources as needed.
+    This class provides a context manager for working with directory archives in
+    various formats. It manages the lifecycle of the archive, including opening
+    and closing resources as needed. It supports filtering files based on
+    ignore patterns.
     """
 
-    def __init__(self, fullpath, fmt):
+    def __init__(self, fullpath, fmt, ignore_patterns=None):
         self._fullpath = fullpath
         self._format = fmt
+        self._ignore_patterns = ignore_patterns or []
         self.name = None
         self.path = None
 
     def __enter__(self):
         self._temp_dir = tempfile.mkdtemp()
         _, dir_name = os.path.split(self._fullpath)
-        self.path = shutil.make_archive(os.path.join(self._temp_dir, dir_name), self._format, self._fullpath)
+        archive_base_path = os.path.join(self._temp_dir, dir_name)
+
+        if self._ignore_patterns:
+            self.path = self._create_archive_with_filters(archive_base_path)
+        else:
+            self.path = shutil.make_archive(archive_base_path, self._format, self._fullpath)
+
         _, self.name = os.path.split(self.path)
         return self
 
     def __exit__(self, *args):
         shutil.rmtree(self._temp_dir)
+
+    def _create_archive_with_filters(self, base_name):
+        if self._format == "zip":
+            archive_path = base_name + ".zip"
+            with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+                for root, dirs, files in os.walk(self._fullpath):
+                    dirs[:] = [
+                        d
+                        for d in dirs
+                        if not should_ignore(
+                            os.path.relpath(os.path.join(root, d), self._fullpath),
+                            True,
+                            self._ignore_patterns,
+                        )
+                    ]
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        rel_path = os.path.relpath(file_path, self._fullpath)
+                        if not should_ignore(rel_path, False, self._ignore_patterns):
+                            zipf.write(file_path, rel_path)
+            return archive_path
+        elif self._format == "tar":
+            archive_path = base_name + ".tar"
+            with tarfile.open(archive_path, "w") as tarf:
+                for root, dirs, files in os.walk(self._fullpath):
+                    dirs[:] = [
+                        d
+                        for d in dirs
+                        if not should_ignore(
+                            os.path.relpath(os.path.join(root, d), self._fullpath),
+                            True,
+                            self._ignore_patterns,
+                        )
+                    ]
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        rel_path = os.path.relpath(file_path, self._fullpath)
+                        if not should_ignore(rel_path, False, self._ignore_patterns):
+                            tarf.add(file_path, rel_path)
+            return archive_path
+        else:
+            raise ValueError(f"Unsupported archive format: {self._format}")
 
 
 class ResumableUploadContext(object):
@@ -3029,6 +3104,7 @@ class KaggleApi:
         rerun: bool = False,
         quiet: bool = False,
         include_hidden: bool = False,
+        ignore_patterns: Optional[List[str]] = None,
     ) -> ApiCreateCompetitionDataResponse:
         """Update (version) the data files for a competition you host.
 
@@ -3054,6 +3130,7 @@ class KaggleApi:
             quiet (bool): Suppress per-file upload progress lines.
             include_hidden (bool): If True, upload hidden files and traverse
                 hidden sub-directories. Default False.
+            ignore_patterns (Optional[List[str]]): Patterns of files/dirs to ignore.
 
         Returns:
             ApiCreateCompetitionDataResponse: url, databundle_id,
@@ -3070,11 +3147,31 @@ class KaggleApi:
         if os.path.isfile(path):
             uploads.append((os.path.basename(path), path))
         else:
+            patterns = (ignore_patterns or []) if include_hidden else DEFAULT_IGNORE_PATTERNS + (ignore_patterns or [])
+
             for dirpath, dirnames, filenames in os.walk(path):
                 if not include_hidden:
                     # Prune hidden sub-directories in place so os.walk skips them.
                     dirnames[:] = [d for d in dirnames if not d.startswith(".")]
                     filenames = [n for n in filenames if not n.startswith(".")]
+
+                # Prune by ignore_patterns
+                pruned_dirnames = []
+                for d in dirnames:
+                    full_dir_path = os.path.join(dirpath, d)
+                    rel_dir_path = os.path.relpath(full_dir_path, path)
+                    if not should_ignore(rel_dir_path, is_dir=True, patterns=patterns):
+                        pruned_dirnames.append(d)
+                dirnames[:] = pruned_dirnames
+
+                pruned_filenames = []
+                for f in filenames:
+                    full_file_path = os.path.join(dirpath, f)
+                    rel_file_path = os.path.relpath(full_file_path, path)
+                    if not should_ignore(rel_file_path, is_dir=False, patterns=patterns):
+                        pruned_filenames.append(f)
+                filenames = pruned_filenames
+
                 for name in filenames:
                     full = os.path.join(dirpath, name)
                     rel = os.path.relpath(full, path).replace(os.sep, "/")
@@ -3091,7 +3188,12 @@ class KaggleApi:
         with ResumableUploadContext() as upload_context:
             for rel_name, full_path in uploads:
                 upload_file = self._upload_file(
-                    rel_name, full_path, ApiBlobType.DATASET, upload_context, quiet, resources=None
+                    rel_name,
+                    full_path,
+                    ApiBlobType.DATASET,
+                    upload_context,
+                    quiet,
+                    resources=None,
                 )
                 if upload_file is not None:
                     f = ApiCompetitionDataFile()
@@ -3120,6 +3222,7 @@ class KaggleApi:
         rerun=False,
         quiet=False,
         include_hidden=False,
+        ignore_patterns=None,
     ):
         """CLI wrapper for competition_data_update."""
         competition_name = competition or competition_opt
@@ -3141,6 +3244,7 @@ class KaggleApi:
             rerun=rerun,
             quiet=quiet,
             include_hidden=include_hidden,
+            ignore_patterns=ignore_patterns,
         )
         print(f'New data version created for "{competition_name}": {response.url}')
 
@@ -4951,6 +5055,7 @@ class KaggleApi:
         convert_to_csv: bool = True,
         delete_old_versions: bool = False,
         dir_mode: str = "skip",
+        ignore_patterns: Optional[List[str]] = None,
     ) -> ApiCreateDatasetResponse:
         """Creates a new version of a dataset.
 
@@ -5018,12 +5123,28 @@ class KaggleApi:
                 message = kaggle.datasets.dataset_api_client.create_dataset_version
             request.body = body
             with ResumableUploadContext() as upload_context:
-                self.upload_files(body, resources, folder, ApiBlobType.DATASET, upload_context, quiet, dir_mode)
+                self.upload_files(
+                    body,
+                    resources,
+                    folder,
+                    ApiBlobType.DATASET,
+                    upload_context,
+                    quiet,
+                    dir_mode,
+                    ignore_patterns,
+                )
                 response = cast(ApiCreateDatasetResponse, self.with_retry(message)(request))
                 return response
 
     def dataset_create_version_cli(
-        self, folder, version_notes, quiet=False, convert_to_csv=True, delete_old_versions=False, dir_mode="skip"
+        self,
+        folder,
+        version_notes,
+        quiet=False,
+        convert_to_csv=True,
+        delete_old_versions=False,
+        dir_mode="skip",
+        ignore_patterns=None,
     ):
         """A client wrapper for creating a new version of a dataset.
 
@@ -5034,6 +5155,7 @@ class KaggleApi:
             convert_to_csv: If True, convert data to CSV on upload.
             delete_old_versions: If True, delete old versions of the dataset.
             dir_mode: What to do with directories: "skip" - ignore; "zip" - compress and upload.
+            ignore_patterns: Patterns of files/dirs to ignore.
         """
         folder = folder or os.getcwd()
         result = self.dataset_create_version(
@@ -5043,6 +5165,7 @@ class KaggleApi:
             convert_to_csv=convert_to_csv,
             delete_old_versions=delete_old_versions,
             dir_mode=dir_mode,
+            ignore_patterns=ignore_patterns,
         )
 
         if result is None:
@@ -5178,6 +5301,7 @@ class KaggleApi:
         quiet: bool = False,
         convert_to_csv: bool = True,
         dir_mode: str = "skip",
+        ignore_patterns: Optional[List[str]] = None,
     ) -> ApiCreateDatasetResponse:
         """Creates a new dataset.
 
@@ -5256,7 +5380,16 @@ class KaggleApi:
         request.category_ids = keywords
 
         with ResumableUploadContext() as upload_context:
-            self.upload_files(request, resources, folder, ApiBlobType.DATASET, upload_context, quiet, dir_mode)
+            self.upload_files(
+                request,
+                resources,
+                folder,
+                ApiBlobType.DATASET,
+                upload_context,
+                quiet,
+                dir_mode,
+                ignore_patterns,
+            )
 
             with self.build_kaggle_client() as kaggle:
                 retry_request = ApiCreateDatasetRequest()
@@ -5275,7 +5408,15 @@ class KaggleApi:
                     result.error = None
                 return result
 
-    def dataset_create_new_cli(self, folder=None, public=False, quiet=False, convert_to_csv=True, dir_mode="skip"):
+    def dataset_create_new_cli(
+        self,
+        folder=None,
+        public=False,
+        quiet=False,
+        convert_to_csv=True,
+        dir_mode="skip",
+        ignore_patterns=None,
+    ):
         """A client wrapper for creating a new dataset.
 
         Args:
@@ -5284,9 +5425,10 @@ class KaggleApi:
             quiet: Suppress verbose output (default is False).
             convert_to_csv: If True, convert data to comma-separated values.
             dir_mode: What to do with directories: "skip" - ignore; "zip" - compress and upload.
+            ignore_patterns: Patterns of files/dirs to ignore.
         """
         folder = folder or os.getcwd()
-        result = self.dataset_create_new(folder, public, quiet, convert_to_csv, dir_mode)
+        result = self.dataset_create_new(folder, public, quiet, convert_to_csv, dir_mode, ignore_patterns)
         if result.invalidTags:
             print(
                 "The following are not valid tags and could not be added to " "the dataset: " + str(result.invalidTags)
@@ -7020,7 +7162,13 @@ class KaggleApi:
         folder = folder or os.getcwd()
         self.model_instance_initialize(folder)
 
-    def model_instance_create(self, folder: str, quiet: bool = False, dir_mode: str = "skip") -> ApiCreateModelResponse:
+    def model_instance_create(
+        self,
+        folder: str,
+        quiet: bool = False,
+        dir_mode: str = "skip",
+        ignore_patterns: Optional[List[str]] = None,
+    ) -> ApiCreateModelResponse:
         """Creates a new model instance.
 
         Args:
@@ -7090,20 +7238,30 @@ class KaggleApi:
             request.body = body
             message = kaggle.models.model_api_client.create_model_instance
             with ResumableUploadContext() as upload_context:
-                self.upload_files(body, None, folder, ApiBlobType.MODEL, upload_context, quiet, dir_mode)
+                self.upload_files(
+                    body,
+                    None,
+                    folder,
+                    ApiBlobType.MODEL,
+                    upload_context,
+                    quiet,
+                    dir_mode,
+                    ignore_patterns,
+                )
                 response = cast(ApiCreateModelResponse, self.with_retry(message)(request))
                 return response
 
-    def model_instance_create_cli(self, folder, quiet=False, dir_mode="skip"):
+    def model_instance_create_cli(self, folder, quiet=False, dir_mode="skip", ignore_patterns=None):
         """A client wrapper for creating a new model instance.
 
         Args:
             folder: The folder from which to get the metadata file.
             quiet: Suppress verbose output (default is False).
             dir_mode: What to do with directories: "skip" - ignore; "zip" - compress and upload.
+            ignore_patterns: Patterns of files/dirs to ignore.
         """
         folder = folder or os.getcwd()
-        result = self.model_instance_create(folder, quiet, dir_mode)
+        result = self.model_instance_create(folder, quiet, dir_mode, ignore_patterns)
 
         if result.id:
             print("Your model instance was created. Id={}. Url={}".format(result.id, result.url))
@@ -7358,7 +7516,13 @@ class KaggleApi:
             print("Model update error: " + result.error)
 
     def model_instance_version_create(
-        self, model_instance: str, folder: str, version_notes: str = "", quiet: bool = False, dir_mode: str = "skip"
+        self,
+        model_instance: str,
+        folder: str,
+        version_notes: str = "",
+        quiet: bool = False,
+        dir_mode: str = "skip",
+        ignore_patterns: Optional[List[str]] = None,
     ) -> ApiCreateModelResponse:
         """Creates a new model instance version.
 
@@ -7385,11 +7549,28 @@ class KaggleApi:
         with self.build_kaggle_client() as kaggle:
             message = kaggle.models.model_api_client.create_model_instance_version
             with ResumableUploadContext() as upload_context:
-                self.upload_files(body, None, folder, ApiBlobType.MODEL, upload_context, quiet, dir_mode)
+                self.upload_files(
+                    body,
+                    None,
+                    folder,
+                    ApiBlobType.MODEL,
+                    upload_context,
+                    quiet,
+                    dir_mode,
+                    ignore_patterns,
+                )
                 response = cast(ApiCreateModelResponse, self.with_retry(message)(request))
                 return response
 
-    def model_instance_version_create_cli(self, model_instance, folder, version_notes="", quiet=False, dir_mode="skip"):
+    def model_instance_version_create_cli(
+        self,
+        model_instance,
+        folder,
+        version_notes="",
+        quiet=False,
+        dir_mode="skip",
+        ignore_patterns=None,
+    ):
         """A client wrapper for creating a new version of a model instance.
 
         Args:
@@ -7399,8 +7580,11 @@ class KaggleApi:
             version_notes: The version notes to record for this new version.
             quiet: Suppress verbose output (default is False).
             dir_mode: What to do with directories: "skip" - ignore; "zip" - compress and upload.
+            ignore_patterns: Patterns of files/dirs to ignore.
         """
-        result = self.model_instance_version_create(model_instance, folder, version_notes, quiet, dir_mode)
+        result = self.model_instance_version_create(
+            model_instance, folder, version_notes, quiet, dir_mode, ignore_patterns
+        )
 
         if result.id != 0:
             print("Your model instance version was created. Url={}".format(result.url))
@@ -7938,6 +8122,7 @@ class KaggleApi:
         upload_context: ResumableUploadContext,
         quiet: bool = False,
         dir_mode: str = "skip",
+        ignore_patterns: Optional[List[str]] = None,
     ) -> None:
         """Uploads files in a folder.
 
@@ -7949,10 +8134,12 @@ class KaggleApi:
             upload_context (ResumableUploadContext): The context for resumable uploads.
             quiet (bool): Suppress verbose output (default is False).
             dir_mode (str): What to do with directories: "skip" - ignore; "zip" - compress and upload.
+            ignore_patterns (Optional[List[str]]): Patterns of files/dirs to ignore.
 
         Returns:
             None:
         """
+        patterns = DEFAULT_IGNORE_PATTERNS + (ignore_patterns or [])
         for file_name in os.listdir(folder):
             if file_name in [
                 self.DATASET_METADATA_FILE,
@@ -7963,8 +8150,21 @@ class KaggleApi:
                 self.MODEL_INSTANCE_METADATA_FILE,
             ]:
                 continue
+
+            full_path = os.path.join(folder, file_name)
+            is_dir = os.path.isdir(full_path)
+            if should_ignore(file_name, is_dir, patterns):
+                continue
+
             upload_file = self._upload_file_or_folder(
-                folder, file_name, blob_type, upload_context, dir_mode, quiet, resources
+                folder,
+                file_name,
+                blob_type,
+                upload_context,
+                dir_mode,
+                quiet,
+                resources,
+                patterns,
             )
             if upload_file is not None:
                 files = request.files
@@ -7988,16 +8188,29 @@ class KaggleApi:
         dir_mode: str,
         quiet: bool = False,
         resources: Optional[List[Dict[str, Union[str, Dict[str, List[Dict[str, str]]]]]]] = None,
+        ignore_patterns: Optional[List[str]] = None,
     ) -> Union[UploadFile, None]:
         full_path = os.path.join(parent_path, file_or_folder_name)
         upload_file = None
         if os.path.isfile(full_path):
-            upload_file = self._upload_file(file_or_folder_name, full_path, blob_type, upload_context, quiet, resources)
+            upload_file = self._upload_file(
+                file_or_folder_name,
+                full_path,
+                blob_type,
+                upload_context,
+                quiet,
+                resources,
+            )
         elif os.path.isdir(full_path):
             if dir_mode in ["zip", "tar"]:
-                with DirectoryArchive(full_path, dir_mode) as archive:
+                with DirectoryArchive(full_path, dir_mode, ignore_patterns=ignore_patterns) as archive:
                     upload_file = self._upload_file(
-                        archive.name, archive.path, blob_type, upload_context, quiet, resources
+                        archive.name,
+                        archive.path,
+                        blob_type,
+                        upload_context,
+                        quiet,
+                        resources,
                     )
             elif not quiet:
                 print("Skipping folder: " + file_or_folder_name + "; use '--dir-mode' to upload folders")

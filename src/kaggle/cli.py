@@ -653,6 +653,13 @@ def parse_competitions(subparsers) -> None:
     parser_competitions_data_update_optional.add_argument(
         "-q", "--quiet", dest="quiet", action="store_true", help=Help.param_quiet
     )
+    parser_competitions_data_update_optional.add_argument(
+        "--ignore-patterns",
+        dest="ignore_patterns",
+        action="append",
+        required=False,
+        help="Patterns to ignore when uploading files/dirs",
+    )
     parser_competitions_data_update._action_groups.append(parser_competitions_data_update_optional)
     parser_competitions_data_update.set_defaults(func=api.competition_data_update_cli)
 
@@ -996,6 +1003,13 @@ def parse_datasets(subparsers) -> None:
     parser_datasets_create_optional.add_argument(
         "-r", "--dir-mode", dest="dir_mode", choices=["skip", "zip", "tar"], default="skip", help=Help.param_dir_mode
     )
+    parser_datasets_create_optional.add_argument(
+        "--ignore-patterns",
+        dest="ignore_patterns",
+        action="append",
+        required=False,
+        help="Patterns to ignore when uploading files/dirs",
+    )
     parser_datasets_create._action_groups.append(parser_datasets_create_optional)
     parser_datasets_create.set_defaults(func=api.dataset_create_new_cli)
 
@@ -1026,6 +1040,13 @@ def parse_datasets(subparsers) -> None:
         dest="delete_old_versions",
         action="store_true",
         help=Help.param_delete_old_version,
+    )
+    parser_datasets_version_optional.add_argument(
+        "--ignore-patterns",
+        dest="ignore_patterns",
+        action="append",
+        required=False,
+        help="Patterns to ignore when uploading files/dirs",
     )
     parser_datasets_version._action_groups.append(parser_datasets_version_optional)
     parser_datasets_version.set_defaults(func=api.dataset_create_version_cli)
@@ -1571,6 +1592,13 @@ def parse_model_instances(subparsers) -> None:
     parser_model_instances_create_optional.add_argument(
         "-r", "--dir-mode", dest="dir_mode", choices=["skip", "zip", "tar"], default="skip", help=Help.param_dir_mode
     )
+    parser_model_instances_create_optional.add_argument(
+        "--ignore-patterns",
+        dest="ignore_patterns",
+        action="append",
+        required=False,
+        help="Patterns to ignore when uploading files/dirs",
+    )
     parser_model_instances_create._action_groups.append(parser_model_instances_create_optional)
     parser_model_instances_create.set_defaults(func=api.model_instance_create_cli)
 
@@ -1675,6 +1703,13 @@ def parse_model_instance_versions(subparsers) -> None:
     )
     parser_model_instance_versions_create_optional.add_argument(
         "-r", "--dir-mode", dest="dir_mode", choices=["skip", "zip", "tar"], default="skip", help=Help.param_dir_mode
+    )
+    parser_model_instance_versions_create_optional.add_argument(
+        "--ignore-patterns",
+        dest="ignore_patterns",
+        action="append",
+        required=False,
+        help="Patterns to ignore when uploading files/dirs",
     )
     parser_model_instance_versions_create._action_groups.append(parser_model_instance_versions_create_optional)
     parser_model_instance_versions_create.set_defaults(func=api.model_instance_version_create_cli)
