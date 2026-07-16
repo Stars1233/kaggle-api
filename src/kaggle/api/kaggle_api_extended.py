@@ -1130,11 +1130,36 @@ class KaggleApi:
     def _authenticate_anonymously(self) -> bool:
         """Check if the command can run anonymously.
 
+        Anonymous access is derived from ``sys.argv``, which is only a Kaggle
+        command when the Kaggle CLI itself is the running program. When the
+        library is merely imported by another application, ``sys.argv`` belongs
+        to that host script (e.g. ``python my_script.py -h``) and must not be
+        interpreted as a Kaggle CLI command.
+
         Returns:
             bool: True if anonymous access is allowed.
         """
+        if not self._invoked_as_cli():
+            return False
         api_command = " ".join(sys.argv[1:])
         return self._command_allows_logged_out(api_command)
+
+    @staticmethod
+    def _invoked_as_cli() -> bool:
+        """Whether the current process is the Kaggle CLI rather than a host
+        application that imported the library.
+
+        Recognizes the installed console entry point (``kaggle`` /
+        ``kaggle.exe``) and ``python -m kaggle`` (which runs
+        ``kaggle/__main__.py``).
+
+        Returns:
+            bool: True if running as the Kaggle CLI.
+        """
+        prog = (sys.argv[0] if sys.argv else "").replace("\\", "/")
+        if os.path.splitext(os.path.basename(prog))[0] == "kaggle":
+            return True
+        return prog.endswith("/kaggle/__main__.py")
 
     def _authenticate_with_access_token(self) -> bool:
         access_token, source = get_access_token_from_env()
