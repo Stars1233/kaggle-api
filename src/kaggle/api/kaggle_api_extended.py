@@ -8156,7 +8156,7 @@ class KaggleApi:
     def _get_bytes_already_uploaded(self, response, quiet):
         range_val = response.headers.get("Range")
         if range_val is None:
-            return 0  # This means server hasn't received anything before.
+            return -1  # This means server hasn't received anything before.
         items = range_val.split("-")  # Example: bytes=0-1000 => ['0', '1000']
         if len(items) != 2:
             if not quiet:

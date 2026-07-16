@@ -39,11 +39,11 @@ class TestUploadHelpers(unittest.TestCase):
         return path
 
     # _get_bytes_already_uploaded tests
-    def test_get_bytes_no_header_returns_zero(self):
+    def test_get_bytes_no_header_returns_minus_one(self):
         response = MagicMock()
         response.headers = {}
         bytes_uploaded = self.api._get_bytes_already_uploaded(response, quiet=True)
-        self.assertEqual(bytes_uploaded, 0)
+        self.assertEqual(bytes_uploaded, -1)
 
     def test_get_bytes_valid_header_returns_bytes(self):
         response = MagicMock()
@@ -510,6 +510,63 @@ class TestUploadHelpers(unittest.TestCase):
         with redirect_stdout(f):
             self.api._get_bytes_already_uploaded(response, quiet=False)
         self.assertIn("Invalid Range header format", f.getvalue())
+
+    def test_resumable_upload_result_no_range_offset(self):
+        result = ResumableUploadResult.Incomplete(-1)
+        self.assertEqual(result.bytes_uploaded, 0)
+        self.assertEqual(result.start_at, 0)
+
+    def test_resumable_upload_result_range_zero_offset(self):
+        result = ResumableUploadResult.Incomplete(0)
+        self.assertEqual(result.bytes_uploaded, 0)
+        self.assertEqual(result.start_at, 1)
+
+    def test_resumable_upload_result_range_mid_offset(self):
+        result = ResumableUploadResult.Incomplete(499)
+        self.assertEqual(result.bytes_uploaded, 499)
+        self.assertEqual(result.start_at, 500)
+
+    @patch("requests.Session")
+    def test_resume_upload_no_range_header(self, mock_session_cls):
+        mock_session = MagicMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 308
+        mock_response.headers = {}
+        mock_session.put.return_value = mock_response
+        mock_session_cls.return_value = mock_session
+
+        res = self.api._resume_upload("path", "url", 1000, quiet=True)
+        self.assertEqual(res.result, ResumableUploadResult.INCOMPLETE)
+        self.assertEqual(res.bytes_uploaded, 0)
+        self.assertEqual(res.start_at, 0)
+
+    @patch("requests.Session")
+    def test_resume_upload_range_zero(self, mock_session_cls):
+        mock_session = MagicMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 308
+        mock_response.headers = {"Range": "bytes=0-0"}
+        mock_session.put.return_value = mock_response
+        mock_session_cls.return_value = mock_session
+
+        res = self.api._resume_upload("path", "url", 1000, quiet=True)
+        self.assertEqual(res.result, ResumableUploadResult.INCOMPLETE)
+        self.assertEqual(res.bytes_uploaded, 0)
+        self.assertEqual(res.start_at, 1)
+
+    @patch("requests.Session")
+    def test_resume_upload_range_mid(self, mock_session_cls):
+        mock_session = MagicMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 308
+        mock_response.headers = {"Range": "bytes=0-499"}
+        mock_session.put.return_value = mock_response
+        mock_session_cls.return_value = mock_session
+
+        res = self.api._resume_upload("path", "url", 1000, quiet=True)
+        self.assertEqual(res.result, ResumableUploadResult.INCOMPLETE)
+        self.assertEqual(res.bytes_uploaded, 499)
+        self.assertEqual(res.start_at, 500)
 
 
 class TestResumableFileUpload(unittest.TestCase):
