@@ -1064,37 +1064,36 @@ class KaggleApi:
                 try:
                     return func(*args)
                 except Exception as e:
-                    if type(e) is HTTPError:
-                        if self._is_retriable(e) and i < max_retries:
-                            # Use Retry-After header for 429 responses when available
-                            if self._is_rate_limited(e):
-                                retry_delay = self._get_retry_after_delay(e.response)
-                                if retry_delay is not None:
-                                    total_delay = retry_delay
-                                    self.logger.info(
-                                        "Rate limited (429). Retry-After: %.1f seconds (attempt %d/%d)",
-                                        total_delay,
-                                        i,
-                                        max_retries,
-                                    )
-                                else:
-                                    total_delay = self._calculate_backoff_delay(
-                                        i, initial_delay_millis, retry_multiplier, randomness_factor
-                                    )
-                                    self.logger.info(
-                                        "Rate limited (429). No valid Retry-After header; "
-                                        "backing off %.1f seconds (attempt %d/%d)",
-                                        total_delay,
-                                        i,
-                                        max_retries,
-                                    )
+                    if self._is_retriable(e) and i < max_retries:
+                        # Use Retry-After header for 429 responses when available
+                        if self._is_rate_limited(e):
+                            retry_delay = self._get_retry_after_delay(e.response)
+                            if retry_delay is not None:
+                                total_delay = retry_delay
+                                self.logger.info(
+                                    "Rate limited (429). Retry-After: %.1f seconds (attempt %d/%d)",
+                                    total_delay,
+                                    i,
+                                    max_retries,
+                                )
                             else:
                                 total_delay = self._calculate_backoff_delay(
                                     i, initial_delay_millis, retry_multiplier, randomness_factor
                                 )
-                            print("Request failed: %s. Will retry in %2.1f seconds" % (e, total_delay), file=sys.stderr)
-                            time.sleep(total_delay)
-                            continue
+                                self.logger.info(
+                                    "Rate limited (429). No valid Retry-After header; "
+                                    "backing off %.1f seconds (attempt %d/%d)",
+                                    total_delay,
+                                    i,
+                                    max_retries,
+                                )
+                        else:
+                            total_delay = self._calculate_backoff_delay(
+                                i, initial_delay_millis, retry_multiplier, randomness_factor
+                            )
+                        print("Request failed: %s. Will retry in %2.1f seconds" % (e, total_delay), file=sys.stderr)
+                        time.sleep(total_delay)
+                        continue
                     raise
 
         return retriable_func

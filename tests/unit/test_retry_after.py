@@ -9,7 +9,8 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
-from requests.exceptions import HTTPError
+import urllib3.exceptions as urllib3_exceptions
+from requests.exceptions import ConnectionError, ConnectTimeout, HTTPError
 from requests.models import Response
 
 from kaggle.api.kaggle_api_extended import KaggleApi
@@ -102,6 +103,18 @@ class TestIsRetriable(unittest.TestCase):
         error = HTTPError(response=response)
         self.assertFalse(self.api._is_retriable(error))
 
+    def test_connection_error_is_retriable(self):
+        self.assertTrue(self.api._is_retriable(ConnectionError("boom")))
+
+    def test_connect_timeout_is_retriable(self):
+        self.assertTrue(self.api._is_retriable(ConnectTimeout("slow")))
+
+    def test_urllib3_protocol_error_is_retriable(self):
+        self.assertTrue(self.api._is_retriable(urllib3_exceptions.ProtocolError("broken")))
+
+    def test_value_error_is_not_retriable(self):
+        self.assertFalse(self.api._is_retriable(ValueError("nope")))
+
 
 class TestWithRetryRateLimiting(unittest.TestCase):
     """Tests for KaggleApi.with_retry() handling 429 responses."""
@@ -166,6 +179,82 @@ class TestWithRetryRateLimiting(unittest.TestCase):
         # Logger should mention missing Retry-After
         log_msg = self.api.logger.info.call_args[0][0]
         self.assertIn("No valid Retry-After", log_msg)
+
+    @patch("kaggle.api.kaggle_api_extended.time.sleep")
+    @patch("builtins.print")
+    def test_connection_error_is_retried(self, mock_print, mock_sleep):
+        call_count = 0
+
+        def failing_then_succeeding(*args):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ConnectionError("connection dropped")
+            return "success"
+
+        wrapped = self.api.with_retry(failing_then_succeeding, max_retries=3)
+        result = wrapped()
+
+        self.assertEqual(result, "success")
+        self.assertEqual(call_count, 2)
+        mock_sleep.assert_called_once()
+
+    @patch("kaggle.api.kaggle_api_extended.time.sleep")
+    @patch("builtins.print")
+    def test_connect_timeout_is_retried(self, mock_print, mock_sleep):
+        call_count = 0
+
+        def failing_then_succeeding(*args):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ConnectTimeout("timed out")
+            return "success"
+
+        wrapped = self.api.with_retry(failing_then_succeeding, max_retries=3)
+        result = wrapped()
+
+        self.assertEqual(result, "success")
+        self.assertEqual(call_count, 2)
+        mock_sleep.assert_called_once()
+
+    @patch("kaggle.api.kaggle_api_extended.time.sleep")
+    @patch("builtins.print")
+    def test_urllib3_protocol_error_is_retried(self, mock_print, mock_sleep):
+        call_count = 0
+
+        def failing_then_succeeding(*args):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise urllib3_exceptions.ProtocolError("connection aborted")
+            return "success"
+
+        wrapped = self.api.with_retry(failing_then_succeeding, max_retries=3)
+        result = wrapped()
+
+        self.assertEqual(result, "success")
+        self.assertEqual(call_count, 2)
+        mock_sleep.assert_called_once()
+
+    @patch("kaggle.api.kaggle_api_extended.time.sleep")
+    @patch("builtins.print")
+    def test_non_retriable_error_fails_immediately(self, mock_print, mock_sleep):
+        call_count = 0
+
+        def always_failing(*args):
+            nonlocal call_count
+            call_count += 1
+            raise ValueError("not retriable")
+
+        wrapped = self.api.with_retry(always_failing, max_retries=3)
+
+        with self.assertRaises(ValueError):
+            wrapped()
+
+        # Should not retry or sleep for a non-retriable exception.
+        self.assertEqual(call_count, 1)
+        mock_sleep.assert_not_called()
 
 
 if __name__ == "__main__":
