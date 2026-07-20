@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 from kaggle.api.kaggle_api_extended import KaggleApi
 from kagglesdk.datasets.types.dataset_types import DatasetSettings, DatasetSettingsFile, DatasetSettingsFileColumn
 from kagglesdk.datasets.types.dataset_api_service import ApiUpdateDatasetMetadataRequest
+from kagglesdk.users.types.users_enums import CollaboratorType
 
 
 def _make_api():
@@ -112,6 +113,78 @@ class TestDatasetMetadataUpdate(unittest.TestCase):
         self.assertEqual(call_args.settings.data[0].columns[0].description, "col1 desc")
         self.assertEqual(call_args.settings.data[0].columns[1].name, "col2")
         self.assertEqual(call_args.settings.data[0].columns[1].description, "col2 desc")  # title mapped to description
+
+    @patch.object(KaggleApi, "build_kaggle_client")
+    def test_metadata_update_with_collaborator_converts_role_to_enum(self, mock_build):
+        # A single collaborator with a string role should be converted to the CollaboratorType enum.
+        metadata = {
+            "title": "New Title",
+            "collaborators": [{"username": "bob", "role": "writer"}],
+        }
+        meta_file = os.path.join(self.temp_dir, "dataset-metadata.json")
+        with open(meta_file, "w") as f:
+            json.dump(metadata, f)
+
+        mock_kaggle = MagicMock()
+        mock_response = MagicMock()
+        mock_response.errors = []
+        mock_kaggle.datasets.dataset_api_client.update_dataset_metadata.return_value = mock_response
+        mock_build.return_value.__enter__ = MagicMock(return_value=mock_kaggle)
+        mock_build.return_value.__exit__ = MagicMock(return_value=False)
+
+        self.api.dataset_metadata_update("owner/dataset", self.temp_dir)
+
+        call_args = mock_kaggle.datasets.dataset_api_client.update_dataset_metadata.call_args[0][0]
+        self.assertEqual(len(call_args.settings.collaborators), 1)
+        self.assertEqual(call_args.settings.collaborators[0].username, "bob")
+        self.assertEqual(call_args.settings.collaborators[0].role, CollaboratorType.WRITER)
+
+    @patch.object(KaggleApi, "build_kaggle_client")
+    def test_metadata_update_with_multiple_collaborators_converts_roles(self, mock_build):
+        # Multiple collaborators with mixed-case roles should each be converted independently.
+        metadata = {
+            "title": "New Title",
+            "collaborators": [
+                {"username": "bob", "role": "writer"},
+                {"username": "alice", "role": "reader"},
+                {"username": "carol", "role": "ADMIN"},
+            ],
+        }
+        meta_file = os.path.join(self.temp_dir, "dataset-metadata.json")
+        with open(meta_file, "w") as f:
+            json.dump(metadata, f)
+
+        mock_kaggle = MagicMock()
+        mock_response = MagicMock()
+        mock_response.errors = []
+        mock_kaggle.datasets.dataset_api_client.update_dataset_metadata.return_value = mock_response
+        mock_build.return_value.__enter__ = MagicMock(return_value=mock_kaggle)
+        mock_build.return_value.__exit__ = MagicMock(return_value=False)
+
+        self.api.dataset_metadata_update("owner/dataset", self.temp_dir)
+
+        call_args = mock_kaggle.datasets.dataset_api_client.update_dataset_metadata.call_args[0][0]
+        collaborators = call_args.settings.collaborators
+        self.assertEqual(len(collaborators), 3)
+        self.assertEqual(collaborators[0].username, "bob")
+        self.assertEqual(collaborators[0].role, CollaboratorType.WRITER)
+        self.assertEqual(collaborators[1].username, "alice")
+        self.assertEqual(collaborators[1].role, CollaboratorType.READER)
+        self.assertEqual(collaborators[2].username, "carol")
+        self.assertEqual(collaborators[2].role, CollaboratorType.ADMIN)
+
+    def test_metadata_update_with_invalid_collaborator_role_fails(self):
+        # An unrecognized role should raise rather than silently pass a bad value to the SDK.
+        metadata = {
+            "title": "New Title",
+            "collaborators": [{"username": "bob", "role": "not-a-role"}],
+        }
+        meta_file = os.path.join(self.temp_dir, "dataset-metadata.json")
+        with open(meta_file, "w") as f:
+            json.dump(metadata, f)
+
+        with self.assertRaises(KeyError):
+            self.api.dataset_metadata_update("owner/dataset", self.temp_dir)
 
     def test_process_column_has_description_uses_description(self):
         col_dict = {"name": "col", "description": "desc", "type": "string"}

@@ -191,6 +191,7 @@ from kagglesdk.datasets.types.dataset_types import (
     DatasetCollaborator,
     DatasetSettingsFile,
 )
+from kagglesdk.users.types.users_enums import CollaboratorType
 from kagglesdk.kaggle_object import KaggleObject
 from kagglesdk.kernels.types.kernels_api_service import (
     ApiListKernelsRequest,
@@ -4675,11 +4676,10 @@ class KaggleApi:
         l.name = name
         return l
 
-    @staticmethod
-    def _new_collaborator(name, role):
+    def _new_collaborator(self, name, role):
         u = DatasetCollaborator()
         u.username = name
-        u.role = role
+        u.role = self.lookup_enum(CollaboratorType, CollaboratorType.COLLABORATOR_TYPE_UNSPECIFIED, role)
         return u
 
     def dataset_metadata(self, dataset, path):
