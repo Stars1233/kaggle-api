@@ -1794,6 +1794,7 @@ class TestDownloadFile:
                 "Content-Range": f"bytes={len(content1)}-{total_size-1}/{total_size}",
             },
         )
+        retry_resp.status_code = 206  # real range responses return 206 Partial Content
 
         outfile = str(tmp_path / "retry_out.bin")
 
@@ -1824,6 +1825,9 @@ class TestDownloadFile:
         os.makedirs(os.path.dirname(outfile), exist_ok=True)
         with open(outfile, "wb") as f:
             f.write(content_existing)
+        # Cross-invocation resume now requires a marker proving the local partial
+        # belongs to the current object (validator = Last-Modified here, no ETag).
+        api._write_resume_marker(outfile, "Mon, 01 Jan 2024 00:00:00 GMT", total_size)
 
         resp = self._make_response(headers={"Content-Length": str(total_size), "Accept-Ranges": "bytes"})
         resp.request.headers = {"Authorization": "Bearer token"}
@@ -1835,6 +1839,7 @@ class TestDownloadFile:
                 "Content-Range": f"bytes={len(content_existing)}-{total_size-1}/{total_size}",
             },
         )
+        resume_resp.status_code = 206  # real range responses return 206 Partial Content
 
         with patch("requests.request", return_value=resume_resp) as mock_request:
             api.download_file(resp, outfile, MagicMock(), resume=True, quiet=True)

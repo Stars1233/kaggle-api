@@ -5469,10 +5469,75 @@ class KaggleApi:
         else:
             print("Dataset creation error: " + result.error)
 
+    def _resume_marker_path(self, outfile):
+        """Path of the sidecar file that records the identity of an in-progress download."""
+        return outfile + ".kaggle-partial"
+
+    def _read_resume_marker(self, outfile):
+        """Return the persisted resume marker dict for ``outfile``, or None if absent/invalid."""
+        try:
+            with open(self._resume_marker_path(outfile), "r") as marker:
+                data = json.load(marker)
+            return data if isinstance(data, dict) else None
+        except (OSError, ValueError):
+            return None
+
+    def _write_resume_marker(self, outfile, validator, size):
+        """Persist the current object's identity next to a partially-downloaded file.
+
+        Without an identity token (``validator``) a future run cannot prove the
+        partial belongs to the current object, so no marker is written (and any
+        stale one is removed) to keep cross-invocation resume disabled.
+        """
+        if validator is None:
+            self._clear_resume_marker(outfile)
+            return
+        try:
+            with open(self._resume_marker_path(outfile), "w") as marker:
+                json.dump({"validator": validator, "size": size}, marker)
+        except OSError:
+            pass  # Best effort: at worst we simply cannot resume this file later.
+
+    def _clear_resume_marker(self, outfile):
+        """Remove the resume marker for ``outfile`` if present."""
+        try:
+            os.remove(self._resume_marker_path(outfile))
+        except OSError:
+            pass
+
+    def _can_resume_partial(self, outfile, resume, resumable, validator, size):
+        """Whether an existing local file is a verified partial of the current object.
+
+        Returns True only when appending to ``outfile`` is provably safe: resume
+        was requested, the server supports ranges, we have an identity token, and
+        a persisted marker matches that token (and the expected total size) while
+        the local file is strictly shorter than the remote object.
+        """
+        if not (resume and resumable) or validator is None:
+            return False
+        if not os.path.isfile(outfile):
+            return False
+        marker = self._read_resume_marker(outfile)
+        if not marker or marker.get("validator") != validator:
+            return False
+        if size is not None and marker.get("size") != size:
+            return False
+        part_size = os.path.getsize(outfile)
+        if size is not None:
+            return 0 < part_size < size
+        return part_size > 0
+
     def download_file(
         self, response, outfile, http_client, quiet=True, resume=False, chunk_size=1048576, max_retries=5, timeout=300
     ):
         """Downloads a file to an output file, streaming in chunks with automatic retry on failure.
+
+        A resume (HTTP Range request appended to the existing file) is only performed
+        when the local bytes are proven to belong to the current remote object: either
+        because it is an in-process retry of the same download, or because a persisted
+        ``.kaggle-partial`` marker records a matching identity token (ETag/Last-Modified)
+        and total size. This prevents silently corrupting or keeping a stale file when
+        the remote object has changed between runs.
 
         Args:
             response: The response object to download.
@@ -5502,6 +5567,12 @@ class KaggleApi:
         # Check if file is resumable
         resumable = "Accept-Ranges" in response.headers and response.headers["Accept-Ranges"] == "bytes"
 
+        # Identity token used to prove a local partial belongs to the *current*
+        # remote object before we resume (append) onto it. Prefer the strong
+        # ETag; fall back to Last-Modified. May be None if the server sends
+        # neither, in which case cross-invocation resume is disabled.
+        resume_validator = response.headers.get("ETag") or last_modified
+
         # Retry loop for handling network errors
         retry_count = 0
         download_url = response.url
@@ -5517,12 +5588,28 @@ class KaggleApi:
                 # Check file existence inside loop (may be created during retry)
                 file_exists = os.path.isfile(outfile)
 
-                # Determine starting position
-                if retry_count > 0 or (resume and resumable and file_exists):
+                # Decide whether to resume an existing file or start fresh.
+                #
+                # Appending only makes sense when the bytes already on disk belong
+                # to the *same* remote object we are fetching now. We allow that
+                # only for an in-process retry (same download session) or when a
+                # persisted resume marker proves the local partial was written for
+                # the current object. Otherwise a stale file from an older/newer
+                # version would be silently corrupted (remote grew) or kept as-is
+                # (remote shrank). See the method docstring.
+                resume_from_partial = retry_count == 0 and self._can_resume_partial(
+                    outfile, resume, resumable, resume_validator, size
+                )
+
+                if retry_count > 0 or resume_from_partial:
                     size_read = os.path.getsize(outfile) if file_exists else 0
                     open_mode = "ab"
 
-                    if size is not None and size_read >= size:
+                    if size is not None and size_read == size:
+                        # Every byte is already present (e.g. a retry that had in
+                        # fact completed). Finalize instead of re-downloading.
+                        os.utime(outfile, times=(remote_date_timestamp, remote_date_timestamp))
+                        self._clear_resume_marker(outfile)
                         if not quiet:
                             print("File already downloaded completely.")
                         return
@@ -5537,9 +5624,14 @@ class KaggleApi:
                         else:
                             print(f"Resuming from {size_read} bytes{remaining}...")
 
-                    # Request with Range header for resume, preserving authentication
+                    # Request with Range header for resume, preserving authentication.
+                    # If-Range asks the server to return the full object (200) instead
+                    # of a partial (206) if it changed underneath us, so we never
+                    # append across a version boundary.
                     retry_headers = original_headers.copy()
                     retry_headers["Range"] = f"bytes={size_read}-"
+                    if resume_validator is not None:
+                        retry_headers["If-Range"] = resume_validator
                     response = requests.request(
                         original_method,
                         download_url,
@@ -5547,9 +5639,35 @@ class KaggleApi:
                         stream=True,
                         timeout=timeout,
                     )
+
+                    if response.status_code == 206:
+                        pass  # Partial content: safe to append from size_read.
+                    elif response.status_code == 200:
+                        # Range ignored or object changed (If-Range miss): the body
+                        # is the whole current object, so overwrite from scratch.
+                        size_read = 0
+                        open_mode = "wb"
+                        self._write_resume_marker(outfile, resume_validator, size)
+                    else:
+                        # e.g. 416 Range Not Satisfiable (local file >= remote size).
+                        # Discard the stale bytes and re-request the full object.
+                        response.close()
+                        response = requests.request(
+                            original_method,
+                            download_url,
+                            headers=original_headers,
+                            stream=True,
+                            timeout=timeout,
+                        )
+                        size_read = 0
+                        open_mode = "wb"
+                        self._write_resume_marker(outfile, resume_validator, size)
                 else:
                     size_read = 0
                     open_mode = "wb"
+                    # Persist object identity up front so a later invocation can
+                    # safely resume this file if the download is interrupted.
+                    self._write_resume_marker(outfile, resume_validator, size)
 
                     if not quiet:
                         print("Downloading " + os.path.basename(outfile) + " to " + outpath)
@@ -5592,6 +5710,10 @@ class KaggleApi:
                         if not quiet:
                             print(f"\n{error_msg}")
                         raise ValueError(error_msg)
+
+                # Completed and verified: drop the resume marker so this file is
+                # never treated as a resumable partial on a future run.
+                self._clear_resume_marker(outfile)
 
                 # Success - exit retry loop
                 break
