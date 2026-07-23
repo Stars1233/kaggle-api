@@ -86,6 +86,8 @@ from kagglesdk.competitions.types.competition_api_service import (
     ApiCreateSubmissionRequest,
     ApiSubmission,
     ApiListSubmissionsRequest,
+    ApiGetSubmissionLimitsRequest,
+    ApiSubmissionLimits,
     ApiListTeamPublicSubmissionsRequest,
     ApiListDataFilesResponse,
     ApiListDataFilesRequest,
@@ -901,6 +903,7 @@ class KaggleApi:
     MODEL_METADATA_FILE = "model-metadata.json"
     MODEL_INSTANCE_METADATA_FILE = "model-instance-metadata.json"
     COMPETITION_METADATA_FILE = "competition-metadata.json"
+    COMPETITION_SUBMIT_UPLOAD_FAILED_MESSAGE = "Could not submit to competition"
     MAX_NUM_INBOX_FILES_TO_UPLOAD = 1000
     MAX_UPLOAD_RESUME_ATTEMPTS = 10
 
@@ -1946,7 +1949,7 @@ class KaggleApi:
                     # Actual error is printed during upload_complete. Not
                     # ideal but changing would not be backwards compatible
                     resp = ApiCreateSubmissionResponse()
-                    resp.message = "Could not submit to competition"
+                    resp.message = self.COMPETITION_SUBMIT_UPLOAD_FAILED_MESSAGE
                     return resp
 
                 submit_request = ApiCreateSubmissionRequest()
@@ -2020,6 +2023,17 @@ class KaggleApi:
                 return ""
             else:
                 raise e
+        submit_succeeded = submit_result.message != self.COMPETITION_SUBMIT_UPLOAD_FAILED_MESSAGE
+        if submit_succeeded and not quiet and competition:
+            # Bonus context: how many submissions are left today. Never fail
+            # the submit over a limits-endpoint blip. Skipped on failed
+            # submissions so we don't imply the submission counted when it
+            # didn't.
+            try:
+                limits = self.competition_get_submission_limits(competition)
+                print(f"{limits.num_allowed_now} submissions remaining today.")
+            except Exception:
+                pass
         return submit_result.message
 
     def competition_submissions(
@@ -2098,6 +2112,46 @@ class KaggleApi:
                 )
             else:
                 print("No submissions found")
+
+    def competition_get_submission_limits(self, competition_name: str) -> ApiSubmissionLimits:
+        """Fetch the calling user's team's submission counts and remaining allowance.
+
+        Args:
+            competition_name (str): The competition name (slug).
+
+        Returns:
+            ApiSubmissionLimits: with num_today, num_total, num_allowed_now,
+            limited_by_total. All zero if the user is not on a team yet.
+        """
+        with self.build_kaggle_client() as kaggle:
+            request = ApiGetSubmissionLimitsRequest()
+            request.competition_name = competition_name
+            return kaggle.competitions.competition_api_client.get_submission_limits(request)
+
+    def competition_get_submission_limits_cli(
+        self,
+        competition=None,
+        competition_opt=None,
+        json_output=False,
+        quiet=False,
+    ):
+        """CLI wrapper for competition_get_submission_limits."""
+        competition_name = competition or competition_opt
+        if competition_name is None:
+            competition_name = self.get_config_value(self.CONFIG_NAME_COMPETITION)
+            if competition_name is not None and not quiet:
+                print("Using competition: " + competition_name)
+        if competition_name is None:
+            raise ValueError("No competition specified")
+
+        limits = self.competition_get_submission_limits(competition_name)
+        if json_output:
+            self.print_obj(limits)
+        else:
+            print(f"Submissions today: {limits.num_today}")
+            print(f"Lifetime submissions: {limits.num_total}")
+            suffix = " (limited by lifetime cap)" if limits.limited_by_total else ""
+            print(f"Remaining today: {limits.num_allowed_now}{suffix}")
 
     def competition_list_files(
         self, competition: str, page_token: Optional[str] = None, page_size: int = 20

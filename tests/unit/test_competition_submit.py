@@ -223,5 +223,91 @@ class TestCompetitionSubmit(unittest.TestCase):
         self.assertIn("Using competition: config-comp", f.getvalue())
 
 
+class TestCompetitionSubmitCliLimits(unittest.TestCase):
+    """After a successful submit, the CLI wrapper should print the remaining
+    submission allowance for the day. Limits errors must not fail the submit."""
+
+    def setUp(self):
+        self.api = KaggleApi.__new__(KaggleApi)
+        self.api.config_values = {"username": "testuser"}
+        self.api.already_printed_version_warning = True
+
+    @patch.object(KaggleApi, "competition_get_submission_limits")
+    @patch.object(KaggleApi, "competition_submit")
+    def test_cli_prints_remaining_after_success(self, mock_submit, mock_limits):
+        resp = ApiCreateSubmissionResponse()
+        resp.message = "submitted"
+        mock_submit.return_value = resp
+        mock_limits.return_value = MagicMock(num_allowed_now=4)
+
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            result = self.api.competition_submit_cli(
+                file_name="sub.csv", message="msg", competition="my-comp", quiet=False
+            )
+
+        self.assertEqual(result, "submitted")
+        mock_limits.assert_called_once_with("my-comp")
+        self.assertIn("4 submissions remaining today.", buf.getvalue())
+
+    @patch.object(KaggleApi, "competition_get_submission_limits")
+    @patch.object(KaggleApi, "competition_submit")
+    def test_cli_swallows_limits_failure(self, mock_submit, mock_limits):
+        resp = ApiCreateSubmissionResponse()
+        resp.message = "submitted"
+        mock_submit.return_value = resp
+        mock_limits.side_effect = RuntimeError("limits endpoint blip")
+
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            result = self.api.competition_submit_cli(
+                file_name="sub.csv", message="msg", competition="my-comp", quiet=False
+            )
+
+        self.assertEqual(result, "submitted")
+        self.assertNotIn("remaining today", buf.getvalue())
+
+    @patch.object(KaggleApi, "competition_get_submission_limits")
+    @patch.object(KaggleApi, "competition_submit")
+    def test_cli_skips_limits_when_quiet(self, mock_submit, mock_limits):
+        resp = ApiCreateSubmissionResponse()
+        resp.message = "submitted"
+        mock_submit.return_value = resp
+
+        self.api.competition_submit_cli(file_name="sub.csv", message="msg", competition="my-comp", quiet=True)
+
+        mock_limits.assert_not_called()
+
+    @patch.object(KaggleApi, "competition_get_submission_limits")
+    @patch.object(KaggleApi, "competition_submit")
+    def test_cli_skips_limits_on_upload_failure(self, mock_submit, mock_limits):
+        # competition_submit returns a synthetic response with this sentinel
+        # message when the file upload fails (no exception raised). We must
+        # NOT print the limits line in that case — it would imply the
+        # submission counted when it didn't.
+        resp = ApiCreateSubmissionResponse()
+        resp.message = KaggleApi.COMPETITION_SUBMIT_UPLOAD_FAILED_MESSAGE
+        mock_submit.return_value = resp
+
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            result = self.api.competition_submit_cli(
+                file_name="sub.csv", message="msg", competition="my-comp", quiet=False
+            )
+
+        self.assertEqual(result, KaggleApi.COMPETITION_SUBMIT_UPLOAD_FAILED_MESSAGE)
+        mock_limits.assert_not_called()
+        self.assertNotIn("remaining today", buf.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
