@@ -1619,7 +1619,8 @@ class KaggleApi:
         If an expiration duration is provided, a new token will be generated with the specified
         expiration duration. Otherwise, the current token will be printed.
 
-        The expiration duration should be in the format of a string with a number followed by a unit,
+        The expiration duration should be a positive integer followed by a single unit suffix:
+        s (seconds), m (minutes), h (hours), d (days) or w (weeks),
         e.g. "1h" for one hour, "2d" for two days, etc.
 
         Args:
@@ -1638,12 +1639,41 @@ class KaggleApi:
                 exit(1)
             print(response.token)
 
+    # Maps the single-letter unit suffix accepted on the command line to the
+    # corresponding ``dateutil.relativedelta`` keyword argument. relativedelta
+    # only accepts the plural keyword names (e.g. ``hours``), so the abbreviated
+    # suffixes must be translated before being passed through.
+    _DURATION_UNITS = {
+        "s": "seconds",
+        "m": "minutes",
+        "h": "hours",
+        "d": "days",
+        "w": "weeks",
+    }
+
     def _parse_duration(self, duration_str: str) -> relativedelta:
+        """Parses a duration string such as "6h" into a ``relativedelta``.
+
+        The duration must be a positive integer followed by a single unit
+        suffix: ``s`` (seconds), ``m`` (minutes), ``h`` (hours), ``d`` (days)
+        or ``w`` (weeks), e.g. "30s", "5m", "6h", "2d", "2w".
+        """
+        invalid = ValueError(
+            "Invalid duration format. Please provide a positive integer followed by a unit: "
+            "s (seconds), m (minutes), h (hours), d (days) or w (weeks), e.g. 30s, 5m, 6h, 2d, 2w."
+        )
+        if not duration_str:
+            raise invalid
+        unit = self._DURATION_UNITS.get(duration_str[-1])
+        if unit is None:
+            raise invalid
         try:
-            delta = relativedelta(**{duration_str[-1]: int(duration_str[:-1])})  # type: ignore[arg-type]
-            return delta
+            value = int(duration_str[:-1])
         except ValueError:
-            raise ValueError("Invalid duration format. Please use one of the following formats: 1h, 30s, 2h30s, 2:30")
+            raise invalid
+        if value <= 0:
+            raise invalid
+        return relativedelta(**{unit: value})  # type: ignore[arg-type]
 
     def auth_revoke_token(self, reason: str):
         """Revokes the current OAuth access token.

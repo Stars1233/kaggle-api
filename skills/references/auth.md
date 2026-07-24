@@ -77,12 +77,15 @@ kaggle auth print-access-token [options]
 
 **Options:**
 
-- `--expiration <DURATION>`: Override token duration.
+- `--expiration <DURATION>`: Override token duration. A positive integer
+  followed by a unit suffix: `s` (seconds), `m` (minutes), `h` (hours),
+  `d` (days) or `w` (weeks). Example: `6h`, `30m`, `2d`.
 
 **Examples:**
 
 ```bash
 kaggle auth print-access-token
+kaggle auth print-access-token --expiration 6h
 ```
 
 **Purpose:** Emit a token that can be placed in `KAGGLE_API_TOKEN` or another
@@ -93,9 +96,9 @@ supported token source.
 - Requires OAuth credentials from `kaggle auth login`.
 - If no OAuth credentials exist, the command tells the user to run
   `kaggle auth login`.
-- Some CLI help examples use short forms such as `6h`. For automation, omit
-  `--expiration` unless the accepted duration format has been verified with
-  the installed CLI.
+- `--expiration` accepts a positive integer followed by a single unit suffix
+  (`s`, `m`, `h`, `d`, `w`), e.g. `6h` or `2d`. Compound (`2h30s`) and colon
+  (`2:30`) formats are not supported.
 
 ## `kaggle auth revoke`
 

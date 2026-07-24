@@ -2311,7 +2311,8 @@ def parse_auth(subparsers) -> None:
         "--expiration",
         dest="expiration_duration",
         required=False,
-        help="Override the default expiration duration. Example: 6h for 6 hours, 2:30 for 2 hours and 30 minutes.",
+        help="Override the default expiration duration. A positive integer followed by a unit: "
+        "s (seconds), m (minutes), h (hours), d (days) or w (weeks). Example: 6h for 6 hours, 30m for 30 minutes.",
     )
     parser_auth_print_access_token.set_defaults(func=api.auth_print_access_token)
 
