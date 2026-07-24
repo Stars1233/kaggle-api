@@ -245,7 +245,10 @@ class TestKernelsPull(unittest.TestCase):
         m = mock_open(read_data=metadata_json)
         mock_open_file.side_effect = m
 
-        self.api.kernels_pull(None, path="/tmp/dummy")
+        # Pass the OS-native effective path so os.path.join() in production yields
+        # separators that match the os.path.normpath() expectations below (on
+        # Windows a POSIX-style path would keep forward slashes and not match).
+        self.api.kernels_pull(None, path=effective_path)
 
         mock_open_file.assert_any_call(metadata_path)
 
@@ -268,7 +271,9 @@ class TestKernelsPull(unittest.TestCase):
             self.api.kernels_pull(None, path="/tmp/dummy")
         self.assertIn("A kernel must be specified", str(context.exception))
 
-    @patch("os.getcwd", return_value="/tmp/cwd")
+    # os.path.normpath keeps the mocked cwd OS-native so production's os.path.join()
+    # matches the os.path.normpath() expectations below on Windows and Linux alike.
+    @patch("os.getcwd", return_value=os.path.normpath("/tmp/cwd"))
     @patch("os.path.exists")
     @patch("os.path.isfile")
     @patch("builtins.open")
@@ -316,7 +321,9 @@ class TestKernelsPull(unittest.TestCase):
     @patch("os.path.exists", return_value=True)
     @patch("os.path.isfile", return_value=False)
     @patch("builtins.open", new_callable=mock_open)
-    @patch.object(KaggleApi, "get_default_download_dir", return_value="/tmp/default_dir")
+    # os.path.normpath keeps the mocked download dir OS-native so production's
+    # os.path.join() matches the os.path.normpath() expectation below on Windows.
+    @patch.object(KaggleApi, "get_default_download_dir", return_value=os.path.normpath("/tmp/default_dir"))
     @patch.object(KaggleApi, "build_kaggle_client")
     def test_kernels_pull_no_path(self, mock_client, mock_get_dir, mock_open_file, mock_isfile, mock_exists):
         mock_kaggle = MagicMock()
