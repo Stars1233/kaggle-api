@@ -255,6 +255,24 @@ def parse_competitions(subparsers) -> None:
     parser_competitions_submit_optional.add_argument(
         "--sandbox", dest="sandbox", action="store_true", help=Help.param_sandbox
     )
+    parser_competitions_submit_optional.add_argument(
+        "--wait",
+        dest="wait",
+        type=int,
+        nargs="?",
+        const=0,
+        default=None,
+        required=False,
+        help=Help.param_submit_wait,
+    )
+    parser_competitions_submit_optional.add_argument(
+        "--poll-interval",
+        dest="poll_interval",
+        type=int,
+        default=60,
+        required=False,
+        help=Help.param_submit_poll_interval,
+    )
     parser_competitions_submit._action_groups.append(parser_competitions_submit_optional)
     parser_competitions_submit.set_defaults(func=api.competition_submit_cli)
 
@@ -281,6 +299,20 @@ def parse_competitions(subparsers) -> None:
     )
     parser_competitions_submissions._action_groups.append(parser_competitions_submissions_optional)
     parser_competitions_submissions.set_defaults(func=api.competition_submissions_cli)
+
+    # Competitions get single submission
+    parser_competitions_submission = subparsers_competitions.add_parser(
+        "submission", formatter_class=argparse.RawTextHelpFormatter, help=Help.command_competitions_submission
+    )
+    parser_competitions_submission_optional = parser_competitions_submission._action_groups.pop()
+    parser_competitions_submission_optional.add_argument(
+        "submission_ref", nargs="?", default=None, help=Help.param_submission_ref
+    )
+    parser_competitions_submission_optional.add_argument(
+        "-r", "--ref", dest="submission_ref_opt", required=False, help=argparse.SUPPRESS
+    )
+    parser_competitions_submission._action_groups.append(parser_competitions_submission_optional)
+    parser_competitions_submission.set_defaults(func=api.competition_submission_cli)
 
     # Competitions leaderboard
     parser_competitions_leaderboard = subparsers_competitions.add_parser(
@@ -2419,6 +2451,7 @@ class Help(object):
         "download",
         "submit",
         "submissions",
+        "submission",
         "leaderboard",
         "team-submissions",
         "submission-limits",
@@ -2564,6 +2597,7 @@ class Help(object):
     command_competitions_download = "Download competition files"
     command_competitions_submit = "Make a new competition submission"
     command_competitions_submissions = "Show your competition submissions"
+    command_competitions_submission = "Show status and score for a single submission by its ref"
     command_competitions_leaderboard = "Get competition leaderboard information"
     command_competitions_team_submissions = "List a team's public submissions (every active submission for simulation competitions, or the public leaderboard submission for regular competitions)"
     command_competitions_submission_limits = (
@@ -2685,6 +2719,15 @@ class Help(object):
     )
     param_code_kernel = "Name of kernel (notebook) to submit to a code competition"
     param_code_version = 'Version of kernel to submit to a code competition, e.g. "3"'
+    param_submit_wait = (
+        "Wait for the submission to finish scoring. Optionally specify a timeout in seconds "
+        "(0 or omit value = wait up to 12 hours, the maximum notebook runtime)"
+    )
+    param_submit_poll_interval = (
+        "Maximum seconds between status polls while waiting (default: 60, minimum: 5). "
+        "Polling starts at 5s and increases automatically"
+    )
+    param_submission_ref = "The numeric submission ref (printed by 'kaggle competitions submit')"
     param_csv = "Print results in CSV format (if not set print in table format)"
     param_format = (
         "Print results in selected format (csv, table, json). For details on "

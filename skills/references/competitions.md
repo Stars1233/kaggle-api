@@ -24,6 +24,7 @@ kaggle competitions (alias: kaggle c)
 ├── download
 ├── submit
 ├── submissions
+├── submission
 ├── leaderboard
 ├── team-submissions
 ├── episodes
@@ -148,6 +149,8 @@ kaggle competitions submit [COMPETITION] -m <MESSAGE> [options]
 - `-m, --message <MESSAGE>`: Required submission description.
 - `-v, --version <VERSION>`: Kernel version for code competitions.
 - `--sandbox`: Mark as sandbox submission for competition hosts/admins.
+- `--wait [SECONDS]`: Wait for the submission to finish scoring and print the public score. `0` or no value waits up to 12 hours (the maximum notebook runtime); a positive value is a timeout in seconds. Exits non-zero on scoring failure or timeout.
+- `--poll-interval <SECONDS>`: Max seconds between status polls while waiting (default 60, minimum 5; starts at 5s, backs off).
 - `-q, --quiet`: Suppress progress output.
 
 **Examples:**
@@ -155,12 +158,33 @@ kaggle competitions submit [COMPETITION] -m <MESSAGE> [options]
 ```bash
 kaggle competitions submit titanic -f submission.csv -m "baseline"
 kaggle c submit lux-ai -k user/agent -f submission.tar.gz -m "agent run" -v 3
+kaggle competitions submit titanic -f submission.csv -m "CI run" --wait 600
 ```
 
 **Purpose:** Submit predictions or code-kernel output to a competition.
 
-**Notes:** `--sandbox` is intended for competition hosts/admins. Code competition
-submission uses `-k`, `-f`, and optional `-v`.
+**Notes:** On success the command prints `Submission ref: <ref>`; use it with
+`kaggle competitions submission <ref>`. `--sandbox` is intended for competition
+hosts/admins. Code competition submission uses `-k`, `-f`, and optional `-v`.
+
+## `kaggle competitions submission`
+
+Shows the status and score of a single submission by its numeric ref.
+
+**Usage:**
+
+```bash
+kaggle competitions submission <SUBMISSION_REF>
+```
+
+**Examples:**
+
+```bash
+kaggle competitions submission 12345678
+```
+
+**Purpose:** Check whether a submission has finished scoring and read its public
+score (e.g. after submitting without `--wait`, or when polling from a script).
 
 ## `kaggle competitions submissions`
 

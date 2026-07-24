@@ -145,6 +145,10 @@ kaggle competitions submit <COMPETITION> -f <FILE_NAME> -m <MESSAGE> [options]
 *   `-v, --version <VERSION>`: Version of the kernel to submit (e.g. `2`).
 *   `-q, --quiet`: Suppress verbose output.
 *   `--sandbox`: Mark submission as a sandbox submission (competition hosts/admins only).
+*   `--wait [SECONDS]`: Wait for the submission to finish scoring, printing the public score when done. Optionally pass a timeout in seconds (`0` or no value = wait up to 12 hours, the maximum notebook runtime). Exits non-zero if scoring fails or the timeout is reached.
+*   `--poll-interval <SECONDS>`: Maximum seconds between status polls while waiting (default: `60`, minimum: `5`). Polling starts at 5s and increases automatically.
+
+On a successful submission the command prints the numeric submission ref, e.g. `Submission ref: 12345678`. You can look that submission up later with [`kaggle competitions submission`](#kaggle-competitions-submission).
 
 **Example: Standard (not code) competition:**
 
@@ -162,9 +166,54 @@ Submit the `submission.csv` produced by version `3` of your `<YOUR_USERNAME>/rsn
 kaggle competitions submit rsna-2024-lumbar-spine-degenerative-classification -f submission.csv -k <YOUR_USERNAME>/rsna-submission -v 3 -m "Test message"
 ```
 
+**Example: Submit and wait for the score (useful in CI):**
+
+Submit and block until scoring finishes (up to a 10-minute timeout), then print the public score:
+
+```bash
+kaggle competitions submit house-prices-advanced-regression-techniques -f sample_submission.csv -m "CI run" --wait 600
+```
+
+The command exits `0` once the submission is scored and non-zero if scoring fails or the timeout is reached, so it can gate a pipeline.
+
 **Purpose:**
 
 Use this command to upload your predictions or code to a competition for scoring.
+
+## `kaggle competitions submission`
+
+Shows the status and score of a single submission by its numeric ref (as printed by `kaggle competitions submit`).
+
+**Usage:**
+
+```bash
+kaggle competitions submission <SUBMISSION_REF>
+```
+
+**Arguments:**
+
+*   `<SUBMISSION_REF>`: The numeric submission ref printed by `kaggle competitions submit`.
+
+**Example:**
+
+```bash
+kaggle competitions submission 12345678
+```
+
+Output:
+
+```
+Submission Ref:  12345678
+Status:          COMPLETE
+Public Score:    0.98765
+Private Score:
+Description:     Test message
+Submission Date: 2026-07-19 12:00:00
+```
+
+**Purpose:**
+
+Use this command to check whether a submission has finished scoring and to read its public score — for example, after submitting without `--wait`, or from a script polling for results.
 
 ## `kaggle competitions submissions`
 
