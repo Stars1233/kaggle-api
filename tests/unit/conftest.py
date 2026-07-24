@@ -61,6 +61,7 @@ def parser(monkeypatch, api):
         parse_models,
         parse_forums,
         parse_benchmarks,
+        parse_search,
         Help,
     )
     import kaggle.cli
@@ -82,4 +83,5 @@ def parser(monkeypatch, api):
     parse_models(subparsers)
     parse_forums(subparsers)
     parse_benchmarks(subparsers)
+    parse_search(subparsers)
     return KaggleParser(root)

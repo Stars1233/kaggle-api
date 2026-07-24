@@ -59,7 +59,8 @@ kaggle
 │   └── topics {list, show}
 ├── config {view, set, unset}
 ├── auth {login, print-access-token, revoke}
-└── quota
+├── quota
+└── search
 ```
 
 Note: the CLI accepts aliases such as `kernels get` for `kernels pull` and
@@ -83,6 +84,7 @@ Read only the reference needed for the user's task:
 - [Configuration](references/configuration.md) - config file, default path, proxy, default competition.
 - [Authentication](references/auth.md) - OAuth login, access token printing, revocation, token/key sources.
 - [Quota](references/quota.md) - weekly GPU/TPU accelerator quota.
+- [Search](references/search.md) - unified cross-content search over competitions, datasets, notebooks, models, users, and discussions.
 
 ## Operating Guidance
 

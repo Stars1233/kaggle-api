@@ -63,6 +63,7 @@ def main() -> None:
     parse_config(subparsers)
     parse_auth(subparsers)
     parse_quota(subparsers)
+    parse_search(subparsers)
     args = parser.parse_args()
     command_args = {}
     command_args.update(vars(args))
@@ -2334,6 +2335,26 @@ def parse_quota(subparsers) -> None:
     parser_quota.set_defaults(func=api.quota_view_cli)
 
 
+def parse_search(subparsers) -> None:
+    parser_search = subparsers.add_parser(
+        "search", formatter_class=argparse.RawTextHelpFormatter, help=Help.group_search
+    )
+    parser_search_optional = parser_search._action_groups.pop()
+    parser_search_optional.add_argument("query", help=Help.param_search_query)
+    parser_search_optional.add_argument(
+        "-t", "--type", dest="document_type", required=False, help=Help.param_search_document_type
+    )
+    parser_search_optional.add_argument("-m", "--mine", dest="mine", action="store_true", help=Help.param_search_mine)
+    parser_search_optional.add_argument("--sort-by", dest="sort_by", required=False, help=Help.param_search_sort_by)
+    parser_search_optional.add_argument(
+        "--page-size", dest="page_size", default=20, type=int, required=False, help=Help.param_page_size
+    )
+    parser_search_optional.add_argument("--page-token", dest="page_token", required=False, help=Help.param_page_token)
+    _add_output_format_args(parser_search_optional)
+    parser_search._action_groups.append(parser_search_optional)
+    parser_search.set_defaults(func=api.search_cli)
+
+
 # ------------------------------------------------------------------
 # Shared helpers for discussion topics across entity types
 # ------------------------------------------------------------------
@@ -2445,6 +2466,7 @@ class Help(object):
         "config",
         "auth",
         "quota",
+        "search",
     ]
     competitions_choices = [
         "list",
@@ -2588,6 +2610,7 @@ class Help(object):
     group_config = "Configuration settings"
     group_auth = "Commands related to authentication"
     group_quota = "Show the current user's weekly GPU and TPU accelerator quota"
+    group_search = "Search across Kaggle competitions, datasets, notebooks, models, users, and discussions"
 
     # Entity topics commands (shared across entity types)
     command_entity_topics_show = "Display a topic with all its comments in tree form"
@@ -2741,6 +2764,19 @@ class Help(object):
     param_page_token = "Page token for results paging."
     param_search = "Term(s) to search for"
     param_mine = "Display only my items"
+
+    # Search params
+    param_search_query = "Term(s) to search for across Kaggle content"
+    param_search_document_type = (
+        "Restrict results to a comma-separated list of content types.\n"
+        "Valid types: competition, dataset, notebook, model, user, discussion, benchmark.\n"
+        "Example: --type dataset,model.\n"
+        "If omitted, all CLI-supported content types (the types listed above) are searched."
+    )
+    param_search_mine = "Restrict the search to your own content"
+    param_search_sort_by = (
+        "Sort order. One of: relevance (default), hotness, votes, dateCreated, dateUpdated, totalComments, lastViewed"
+    )
 
     # Forums params
     param_forum = (

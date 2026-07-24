@@ -243,6 +243,14 @@ from kagglesdk.models.types.model_api_service import (
 from kagglesdk.models.types.model_enums import ListModelsOrderBy, ModelInstanceType, ModelFramework
 from kagglesdk.models.types.model_proxy_api_service import ApiCreateDefaultModelProxyTokenRequest
 from kagglesdk.models.types.model_types import Owner
+from kagglesdk.search.types.search_api_service import (
+    ApiListType,
+    ListEntitiesDocument,
+    ListEntitiesFilters,
+    ListEntitiesRequest,
+    ListEntitiesResponse,
+)
+from kagglesdk.search.types.search_enums import DocumentType, ListSearchContentOrderBy
 from kagglesdk.security.types.oauth_service import IntrospectTokenRequest
 from ..models.upload_file import UploadFile
 import kagglesdk.kaggle_client
@@ -955,6 +963,18 @@ class KaggleApi:
         "scoreDescending",
         "viewCount",
         "voteCount",
+    ]
+
+    # Search valid types
+    valid_search_document_types = ["competition", "dataset", "notebook", "model", "user", "discussion", "benchmark"]
+    valid_search_sort_by = [
+        "relevance",
+        "hotness",
+        "votes",
+        "dateCreated",
+        "dateUpdated",
+        "totalComments",
+        "lastViewed",
     ]
 
     # Competitions valid types
@@ -6381,6 +6401,247 @@ class KaggleApi:
             csv_display=csv_display,
             output_format=output_format,
         )
+
+    def search(
+        self,
+        query: str,
+        document_types: Optional[list[str]] = None,
+        sort_by: Optional[str] = None,
+        mine: bool = False,
+        page_size: int = 20,
+        page_token: Optional[str] = None,
+    ) -> ListEntitiesResponse:
+        """Searches across Kaggle content using a single unified query.
+
+        Searches competitions, datasets, notebooks, models, users, and
+        discussions in one request and returns a page of ranked results.
+
+        Args:
+            query (str): The free-text search query (required).
+            document_types (Optional[list[str]]): The content types to restrict results
+                to. Valid values are in valid_search_document_types. If omitted, all
+                CLI-supported content types are searched (rather than every backend
+                document type such as comments, blogs, or courses).
+            sort_by (Optional[str]): How to sort results, one of valid_search_sort_by
+                (default is "relevance").
+            mine (bool): If True, restrict the search to the current user's own content.
+            page_size (int): The number of results per page (default is 20, max is 100).
+            page_token (Optional[str]): The page token for pagination.
+
+        Returns:
+            ListEntitiesResponse: The response with documents and next_page_token.
+        """
+        query = query.strip() if query else ""
+        if not query:
+            raise ValueError("A search query must be specified")
+
+        page_size = int(page_size)
+        if page_size <= 0:
+            raise ValueError("Page size must be >= 1")
+        if page_size > 100:
+            page_size = 100
+
+        # Default to the CLI-supported content types (rather than sending an empty
+        # filter, which would let the backend include unrenderable types such as
+        # comments, blogs, and courses). The backend's canonical ranking still
+        # orders the mixed results; we only constrain which types are in the pool.
+        if not document_types:
+            document_types = self.valid_search_document_types
+        resolved_types = self._resolve_search_document_types(document_types)
+        order_by = self._resolve_search_sort_by(sort_by)
+
+        with self.build_kaggle_client() as kaggle:
+            request = ListEntitiesRequest()
+            self._set_paging(request, page_size, page_token)
+            request.canonical_order_by = order_by
+            filters = ListEntitiesFilters()
+            filters.query = query
+            filters.document_types = resolved_types
+            if mine:
+                filters.list_type = ApiListType.API_LIST_TYPE_YOUR_WORK
+            request.filters = filters
+            return kaggle.search.search_api_client.list_entities(request)
+
+    def search_cli(
+        self,
+        query,
+        document_type=None,
+        sort_by=None,
+        mine=False,
+        page_size=20,
+        page_token=None,
+        csv_display=False,
+        output_format=None,
+    ):
+        """A client wrapper for search.
+
+        Args:
+            query: The free-text search query (required).
+            document_type: A comma-separated list of content types to restrict to.
+            sort_by: How to sort results, one of valid_search_sort_by.
+            mine: If True, restrict the search to the current user's own content.
+            page_size: The number of results per page (default is 20).
+            page_token: The page token for pagination.
+            csv_display: If True, print comma-separated values instead of a table.
+            output_format: The output format to use.
+        """
+        document_types = document_type.split(",") if document_type else None
+        response = self.search(
+            query=query,
+            document_types=document_types,
+            sort_by=sort_by,
+            mine=mine,
+            page_size=page_size,
+            page_token=page_token,
+        )
+        documents = response.documents if response else None
+        if response and response.next_page_token:
+            print("Next Page Token = {}".format(response.next_page_token))
+        if documents:
+            rows = [self._search_document_to_row(document) for document in documents]
+            fields = ["type", "ref", "title", "owner", "votes"]
+            self.print_results(
+                rows,
+                fields,
+                csv_display=csv_display,
+                output_format=output_format,
+            )
+        else:
+            print("No matches found")
+
+    def _resolve_search_document_types(self, document_types: Optional[list[str]]) -> list[DocumentType]:
+        """Resolves user-supplied content-type names to DocumentType enum values.
+
+        Args:
+            document_types (Optional[list[str]]): The list of type names to resolve.
+
+        Returns:
+            list[DocumentType]: The resolved, de-duplicated enum values (empty for all types).
+        """
+        if not document_types:
+            return []
+        # notebook/kernel and discussion are CLI names that don't match their
+        # DocumentType members (KERNEL, TOPIC); everything else is resolved by
+        # lookup_enum. The supported set gates out backend types the CLI cannot
+        # render (comment, blog, course, ...).
+        aliases = {"notebook": "kernel", "kernel": "kernel", "discussion": "topic"}
+        supported = set(self.valid_search_document_types) | set(aliases)
+        resolved: list[DocumentType] = []
+        for raw in document_types:
+            key = raw.strip().lower()
+            if key.endswith("s"):
+                key = key[:-1]
+            if key not in supported:
+                raise ValueError(
+                    "Invalid document type '%s' specified. Valid options are %s"
+                    % (raw.strip(), str(self.valid_search_document_types))
+                )
+            value = self.lookup_enum(DocumentType, DocumentType.DOCUMENT_TYPE_UNSPECIFIED, aliases.get(key, key))
+            if value not in resolved:
+                resolved.append(value)
+        return resolved
+
+    def _resolve_search_sort_by(self, sort_by: Optional[str]) -> ListSearchContentOrderBy:
+        """Resolves a user-supplied sort name to a ListSearchContentOrderBy enum value.
+
+        Args:
+            sort_by (Optional[str]): The sort name to resolve (default is "relevance").
+
+        Returns:
+            ListSearchContentOrderBy: The resolved enum value.
+        """
+        if not sort_by:
+            sort_by = "relevance"
+        if sort_by not in self.valid_search_sort_by:
+            raise ValueError(
+                "Invalid sort by '%s' specified. Valid options are %s" % (sort_by, str(self.valid_search_sort_by))
+            )
+        if sort_by == "relevance":
+            # ListSearchContentOrderBy has no RELEVANCE member; UNSPECIFIED is the
+            # backend's default relevance ranking.
+            return ListSearchContentOrderBy.LIST_SEARCH_CONTENT_ORDER_BY_UNSPECIFIED
+        return self.lookup_enum(
+            ListSearchContentOrderBy,
+            ListSearchContentOrderBy.LIST_SEARCH_CONTENT_ORDER_BY_UNSPECIFIED,
+            sort_by,
+        )
+
+    def _search_document_to_row(self, document: ListEntitiesDocument) -> "SimpleNamespace":
+        """Normalizes a mixed-type search document into a flat row for display.
+
+        Args:
+            document (ListEntitiesDocument): A single search result document.
+
+        Returns:
+            SimpleNamespace: A row with type, ref, title, owner, and votes attributes.
+        """
+        owner = self._search_document_owner(document)
+        return SimpleNamespace(
+            type=self._search_document_type_label(document.document_type),
+            ref=self._search_document_ref(document, owner),
+            title=document.title or "",
+            owner=owner or "-",
+            votes=document.votes if document.votes is not None else 0,
+        )
+
+    def _search_document_owner(self, document: ListEntitiesDocument) -> Optional[str]:
+        """Extracts the owner handle for a search document, if any.
+
+        Args:
+            document (ListEntitiesDocument): A single search result document.
+
+        Returns:
+            Optional[str]: The owner user name or organization slug, or None.
+        """
+        if document.document_type == DocumentType.USER:
+            return None
+        if document.owner_user is not None and document.owner_user.user_name:
+            return document.owner_user.user_name
+        if document.owner_organization is not None and document.owner_organization.slug:
+            return document.owner_organization.slug
+        return None
+
+    def _search_document_ref(self, document: ListEntitiesDocument, owner: Optional[str]) -> str:
+        """Builds a CLI-usable reference for a search document.
+
+        Datasets, notebooks, and models are referenced as ``owner/slug``; competitions
+        and users are referenced by their slug alone.
+
+        Args:
+            document (ListEntitiesDocument): A single search result document.
+            owner (Optional[str]): The pre-computed owner handle for the document.
+
+        Returns:
+            str: The reference string.
+        """
+        slug = document.slug or ""
+        owner_slug_types = (
+            DocumentType.DATASET,
+            DocumentType.KERNEL,
+            DocumentType.MODEL,
+            DocumentType.BENCHMARK,
+        )
+        if document.document_type in owner_slug_types and owner and slug:
+            return "%s/%s" % (owner, slug)
+        if slug:
+            return slug
+        return str(document.id) if document.id else ""
+
+    def _search_document_type_label(self, document_type: DocumentType) -> str:
+        """Returns a friendly, user-facing label for a document type.
+
+        Args:
+            document_type (DocumentType): The document type enum value.
+
+        Returns:
+            str: A lowercase label such as "notebook" or "discussion".
+        """
+        # Only KERNEL and TOPIC need a user-facing label that differs from their
+        # enum name; everything else uses the built-in enum name.
+        overrides = {DocumentType.KERNEL: "notebook", DocumentType.TOPIC: "discussion"}
+        if document_type in overrides:
+            return overrides[document_type]
+        return document_type.name.replace("DOCUMENT_TYPE_", "").lower()
 
     def kernels_list_files(self, kernel, page_token=None, page_size=20):
         """Lists files for a kernel.
