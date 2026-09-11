@@ -483,6 +483,29 @@ DEFAULT_IGNORE_PATTERNS = [
     ".huggingface/",
 ]
 
+_RETIRED_ACCELERATORS = {
+    "nvidiateslap100": "Sessions run on the default GPU (NvidiaTeslaT4) instead.",
+    "tpuv38": "Sessions run on the default TPU (TpuV5E8) instead.",
+    "tpu1vmv38": "Sessions run on the default TPU (TpuV5E8) instead.",
+    "tpuv232": "Sessions run on CPU instead, with no accelerator at all.",
+    "tpuv2256": "Sessions run on CPU instead, with no accelerator at all.",
+}
+
+
+def _warn_if_retired_accelerator(machine_shape: Optional[str]) -> None:
+    """Warns that a retired accelerator will be substituted, without changing the request.
+
+    The server decides what a session actually runs on and silently falls back for a retired shape, so this
+    is advisory only: the push still goes through with the requested value.
+    """
+    shape = (machine_shape or "").strip()
+    detail = _RETIRED_ACCELERATORS.get(shape.lower())
+    if not detail:
+        return
+    msg1 = KaggleApi._warn(f"⚠ Warning: {shape!r} is retired.")
+    msg2 = KaggleApi._warn_detail(f"  {detail}")
+    print(f"{msg1}\n{msg2}", file=sys.stderr)
+
 
 def _is_within_directory(directory: str, target: str) -> bool:
     """True if `target` (already realpath'd) resolves inside `directory` (already realpath'd)."""
@@ -7096,10 +7119,8 @@ class KaggleApi:
             folder (str): The path to the folder.
             timeout (Optional[str]): The maximum run time in seconds.
             acc (Optional[str]): The type of accelerator to use for the kernel run. If set, this value overrides boolean
-                settings for GPU/TPU found in the metadata file. Note: "NvidiaTeslaP100" is not usable for GPU compute
-                with the default Kaggle image, whose PyTorch build (cu128) omits Pascal (sm_60) kernels, so the first
-                CUDA operation fails with cudaErrorNoKernelImageForDevice even though torch.cuda.is_available() returns
-                True. Use "NvidiaTeslaT4" or install a Pascal-compatible torch build.
+                settings for GPU/TPU found in the metadata file. Retired shapes such as "NvidiaTeslaP100"
+                are accepted but warn, since the server runs the session on a replacement instead.
             no_run (bool): Save a new version without executing the notebook, the equivalent of Quick Save in
                 the web UI. The default is to save and run.
 
@@ -7221,6 +7242,7 @@ class KaggleApi:
                 request.session_timeout_seconds = int(timeout)
             # The allowed names are in an enum that is not currently included in kagglesdk.
             request.machine_shape = acc if acc else self.get_or_default(meta_data, "machine_shape", None)
+            _warn_if_retired_accelerator(request.machine_shape)
             if no_run:
                 request.kernel_execution_type = KernelExecutionType.QUICK_SAVE
             # Without the type hint, mypy thinks save_kernel() has type Any when checking warn_return_any.
