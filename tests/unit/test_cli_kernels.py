@@ -158,6 +158,7 @@ def test_kernels_pull_parser_default_succeeds(parser):
     func, kwargs = parser.dispatch(["kernels", "pull"])
     assert func.__name__ == "kernels_pull_cli"
     assert kwargs.get("kernel") is None
+    assert kwargs.get("kernel_opt") is None
     assert kwargs.get("path") is None
     assert kwargs.get("metadata") is False
 
@@ -171,9 +172,8 @@ def test_kernels_pull_parser_with_positional_kernel_succeeds(parser):
 def test_kernels_pull_parser_with_option_kernel_succeeds(parser):
     func, kwargs = parser.dispatch(["kernels", "pull", "-k", "owner/kernel-name"])
     assert func.__name__ == "kernels_pull_cli"
-    # Both positional and option write to dest='kernel', but because of a bug in cli.py,
-    # the option value is overwritten by the positional default (None) when positional is omitted.
     assert kwargs.get("kernel") is None
+    assert kwargs["kernel_opt"] == "owner/kernel-name"
 
 
 def test_kernels_pull_parser_with_flags_succeeds(parser):

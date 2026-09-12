@@ -1437,7 +1437,9 @@ def parse_kernels(subparsers) -> None:
     )
     parser_kernels_pull_optional = parser_kernels_pull._action_groups.pop()
     parser_kernels_pull_optional.add_argument("kernel", nargs="?", default=None, help=Help.param_kernel)
-    parser_kernels_pull_optional.add_argument("-k", "--kernel", dest="kernel", required=False, help=argparse.SUPPRESS)
+    parser_kernels_pull_optional.add_argument(
+        "-k", "--kernel", dest="kernel_opt", required=False, help=argparse.SUPPRESS
+    )
     parser_kernels_pull_optional.add_argument("-p", "--path", dest="path", required=False, help=Help.param_downfolder)
     parser_kernels_pull_optional.add_argument(
         "-w", "--wp", dest="path", action="store_const", const=".", required=False, help=Help.param_wp

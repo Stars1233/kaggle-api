@@ -345,6 +345,12 @@ class TestKernelsPull(unittest.TestCase):
         expected_path = os.path.normpath("/tmp/default_dir/my-slug.py")
         mock_open_file.assert_called_once_with(expected_path, "w", encoding="utf-8")
 
+    @patch.object(KaggleApi, "kernels_pull")
+    def test_kernels_pull_cli_honors_kernel_opt(self, mock_pull):
+        self.api.kernels_pull_cli(None, kernel_opt="owner/my-slug")
+
+        mock_pull.assert_called_once_with("owner/my-slug", path=None, metadata=False, quiet=False)
+
 
 if __name__ == "__main__":
     unittest.main()
