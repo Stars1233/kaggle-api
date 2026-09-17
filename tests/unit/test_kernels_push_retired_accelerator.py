@@ -141,6 +141,14 @@ class TestKernelsPushRetiredAccelerator(unittest.TestCase):
 
         self.assertEqual(request.machine_shape, "NvidiaTeslaP100")
 
+    def test_cli_accelerator_help_documents_t4_x2_and_tpu(self):
+        from kaggle.cli import Help
+
+        self.assertIn("NvidiaTeslaT4", Help.param_kernel_acc)
+        self.assertIn("GPU T4 x2", Help.param_kernel_acc)
+        self.assertNotIn("NvidiaTeslaT4Highmem", Help.param_kernel_acc)
+        self.assertIn("TpuV5E8", Help.param_kernel_acc)
+
 
 if __name__ == "__main__":
     unittest.main()
